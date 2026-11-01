@@ -1,0 +1,83 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+    // 주문(orders)은 셀러별로 분리됩니다. 체크아웃이 장바구니를 셀러별로 나눠 주문을 만들고,
+    // 각 주문에 sellerId(상품을 파는 셀러 uid)를 저장합니다.
+    // - 구매자(userId): 자기 주문 읽기
+    // - 셀러(sellerId): 자기 상점으로 들어온 주문 읽기 + 상태 변경
+    // - 운영자(users/{uid}.role == 'admin'): 전체 주문 (운영/CS용)
+    function isAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    match /users/{uid} {
+      allow read: if true;
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid);
+      allow delete: if false;
+    }
+
+    // 상점아이디(슬러그) → uid 매핑. 문서 id가 상점아이디입니다.
+    // 누구나 상점 주소로 조회할 수 있어야 하므로 읽기는 공개하고,
+    // 생성/삭제는 본인 uid로만, 다른 사람이 선점한 슬러그는 덮어쓸 수 없습니다.
+    match /storeSlugs/{storeId} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+      // 본인이 이미 가진 주소를 다시 저장하는 경우(트랜잭션의 set)만 허용합니다.
+      allow update: if isSignedIn() && resource.data.uid == request.auth.uid &&
+        request.resource.data.uid == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // 상품: 누구나 읽기 가능, 생성/수정/삭제는 sellerId가 본인 uid일 때만
+    match /products/{productId} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.resource.data.sellerId == request.auth.uid;
+      allow update: if isSignedIn() &&
+        resource.data.sellerId == request.auth.uid &&
+        request.resource.data.sellerId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.sellerId == request.auth.uid;
+    }
+
+    // 셀러별 쇼핑몰 설정: 문서 id 자체가 sellerId(uid)
+    match /settings/{uid} {
+      allow read: if true;
+      allow write: if isOwner(uid);
+    }
+
+    match /orders/{orderId} {
+      allow read: if isSignedIn() &&
+        (resource.data.userId == request.auth.uid ||
+         resource.data.sellerId == request.auth.uid ||
+         isAdmin());
+
+      // 구매자 본인이 주문을 만들 수 있고, 반드시 '입금 대기' 상태로 시작해야 합니다.
+      allow create: if isSignedIn() &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.sellerId is string &&
+        request.resource.data.sellerId.size() > 0 &&
+        request.resource.data.status == 'waiting_payment';
+
+      allow update: if isAdmin() ||
+        // 셀러: 자기 주문의 상태(status)와 수정시각만 바꿀 수 있어요.
+        (isSignedIn() && resource.data.sellerId == request.auth.uid &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])) ||
+        // 구매자: 입금 대기 → 입금 확인 중 (입금완료 버튼)만 가능해요.
+        (isSignedIn() && resource.data.userId == request.auth.uid &&
+         resource.data.status == 'waiting_payment' &&
+         request.resource.data.status == 'payment_checking' &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']));
+
+      allow delete: if isAdmin();
+    }
+  }
+}
