@@ -1,0 +1,12 @@
+[배포 방법]
+
+1) 이 폴더 안의 파일을 전부 기존 프로젝트(깃허브)에 덮어쓰고 push 하세요.
+   * 새로 생긴 폴더/파일도 꼭 같이 올려야 합니다:
+     - public/ 폴더 (파비콘 3개: shipda-v2.ico, shipda-icon-v2.png, shipda-apple-v2.png)
+     - src/lib/shopHome.ts
+     - src/components/shop/RememberShop.tsx
+   * 환경변수(.env)는 건드리지 마세요.
+2) Vercel에서 배포가 끝나면(Ready) 확인하세요.
+3) 파비콘 확인: 시크릿 창으로 사이트를 열거나, 주소창에 "사이트주소/shipda-icon-v2.png" 를 쳐서 $ 아이콘이 나오는지 보세요.
+   (일반 창은 브라우저가 옛 아이콘을 오래 기억합니다. 탭을 닫고 다시 열면 바뀝니다.)
+4) Firestore 규칙은 이미 게시했다면 다시 할 필요 없습니다.
